@@ -896,6 +896,74 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_input_message_length() {
+        let user_schema = create_test_schema();
+        let chat_config = FunctionConfigChat {
+            variants: HashMap::new(),
+            system_schema: None,
+            user_schema: Some(user_schema),
+            assistant_schema: None,
+            tools: vec![],
+            ..Default::default()
+        };
+        let function_config = FunctionConfig::Chat(chat_config);
+
+        // Test case for message too long
+        let messages = vec![
+            InputMessage {
+                role: Role::User,
+                content: vec![InputMessageContent::Text { value: "a".repeat(101).into() }],
+            },
+        ];
+        let input = Input {
+            system: Some(json!("system content")),
+            messages,
+        };
+
+        let validation_result = function_config.validate_input(&input);
+        assert_eq!(
+            validation_result.unwrap_err(),
+            Error::new(ErrorDetails::InvalidMessage {
+                message: "Message at index 0 is too long".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_validate_input_user_message_presence() {
+        let user_schema = create_test_schema();
+        let chat_config = FunctionConfigChat {
+            variants: HashMap::new(),
+            system_schema: None,
+            user_schema: Some(user_schema),
+            assistant_schema: None,
+            tools: vec![],
+            ..Default::default()
+        };
+        let function_config = FunctionConfig::Chat(chat_config);
+
+        // Test case for no user message
+        let messages = vec![
+            InputMessage {
+                role: Role::Assistant,
+                content: vec!["assistant content".to_string().into()],
+            },
+        ];
+        let input = Input {
+            system: Some(json!("system content")),
+            messages,
+        };
+
+        let validation_result = function_config.validate_input(&input);
+        assert_eq!(
+            validation_result.unwrap_err(),
+            Error::new(ErrorDetails::InvalidMessage {
+                message: "Input must contain at least one user message.".to_string(),
+            })
+        );
+    }
+
+    #[test]
     fn test_validate_input_json_system_schema() {
         let system_schema = create_test_schema();
         let system_value = system_schema.value.clone();
