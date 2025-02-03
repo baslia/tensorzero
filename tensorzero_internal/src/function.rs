@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::instrument;
 use uuid::Uuid;
+use tiktoken::TikToken;
 
 use crate::embeddings::EmbeddingModelTable;
 use crate::endpoints::inference::InferenceParams;
@@ -296,6 +297,10 @@ fn validate_all_text_input(
     assistant_schema: Option<&JSONSchemaFromPath>,
     input: &Input,
 ) -> Result<(), Error> {
+    // Initialize tiktoken
+    let tiktoken = TikToken::default();
+
+    // Validate system message
     match (input.system.as_ref(), system_schema) {
         // If there is any system message passed we validate it
         (Some(system), _) => validate_single_message(system, system_schema, None),
@@ -306,10 +311,21 @@ fn validate_all_text_input(
             message: "`input.system` is empty but a system template is present.".to_string(),
         })),
     }?;
+
+    // Track the presence of user messages
+    let mut has_user_message = false;
+
+    // Validate user and assistant messages
     for (index, message) in input.messages.iter().enumerate() {
         let mut content: Option<&Value> = None;
         for block in message.content.iter() {
             if let InputMessageContent::Text { value } = block {
+                // Check if the message is too long using tiktoken
+                if tiktoken.encode(value.as_str().unwrap()).len() > 100 {
+                    return Err(Error::new(ErrorDetails::InvalidMessage {
+                        message: format!("Message at index {index} is too long"),
+                    }));
+                }
                 // Throw an error if we have multiple text blocks in a message
                 if content.is_some() {
                     return Err(Error::new(ErrorDetails::InvalidMessage {
@@ -329,11 +345,20 @@ fn validate_all_text_input(
                     Some((index, &message.role)),
                 )?,
                 Role::User => {
+                    has_user_message = true;
                     validate_single_message(content, user_schema, Some((index, &message.role)))?
                 }
             }
         }
     }
+
+    // Ensure there is at least one user message
+    if !has_user_message {
+        return Err(Error::new(ErrorDetails::InvalidMessage {
+            message: "Input must contain at least one user message.".to_string(),
+        }));
+    }
+
     Ok(())
 }
 
